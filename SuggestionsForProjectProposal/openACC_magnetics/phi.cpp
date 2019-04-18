@@ -11,11 +11,11 @@ using namespace std;
 #include <cmath>
 #include <complex>
 
-#define L 32
+#define L 2048
 #define D 2
  
-#define MEASURE 100
-#define WARM_UP 100
+#define MEASURE 5
+#define WARM_UP 5
 typedef complex<double> Complex;
 #define I Complex(0,1)
 #define PI 3.141592653589793
@@ -39,12 +39,12 @@ void hotStart(double phi[L][L], param_t p);
 void coldStart(double phi[L][L],param_t p);
 void writeLattice(const double phi[L][L], fstream & nameStream);
 void readLattice(double phi[L][L],  fstream & nameStream );
-int hmc(double phi[L][L], param_t p, int iter);
+int hmc(double fU[L][L], double mom[L][L], double phi[L][L], param_t p, int iter);
 double calcH(double mom[L][L], double phi[L][L],param_t p);
 void forceU(double fU[L][L], double phi[L][L], param_t p);
 void update_mom(double mom[L][L], double fU[L][L], param_t p, double dt);
 void update_phi(double phi[L][L], double mom[L][L], param_t p, double dt);
-void trajectory(double mom[L][L], double phi[L][L], param_t p);
+void trajectory(double fU[L][L], double mom[L][L], double phi[L][L], param_t p);
 
 void gaussReal_F(double mom[L][L]);
 double measMag(const double phi[L][L]);
@@ -107,8 +107,6 @@ void hotStart(double phi[L][L],param_t p) {
   return;
 }  
 
-
-
 int main(int argc, char **argv) {
   
   param_t p;
@@ -121,6 +119,8 @@ int main(int argc, char **argv) {
   p.nperc = 5;
   
   double phi[L][L];
+  double mom[L][L];
+  double fU[L][L];
 
   cout <<" Size "<< L  <<" lambda = "<< p.lambda <<" musqr = "<< p.musqr << endl;
   cout<<" time step = "<< p.dt<< " trajectory steps "<<  p.nstep  << " trajectory length = " << p.dt*p.nstep<< endl;
@@ -158,89 +158,94 @@ int main(int argc, char **argv) {
 
   double momZero[L][L];
   zeroField(momZero);
-  
-  //Thermalise the field. This evolves the phi field
-  //from a completely random (hot start)
-  //or a completely ordered (cold start)
-  //to a state of thermal equlibrium.
-  for(int iter = 0; iter < WARM_UP; iter++) {
-    accepted = hmc(phi, p, iter);
-    if(iter%p.nperc == 0) {
-      //LatticePercolate(bond, label, phi);
-      stop = false;
-      for(int relax = 0; relax < 1000 && !stop; relax++) {
-	stop =  MultigridSW(label, bond);
-	//FlipSpins(phi,label);
-      }
-    }  
-  }
-  
-  //reset acceptance
-  accepted = 0;
-  for(int iter = WARM_UP; iter < p.nskip*MEASURE + WARM_UP; iter++) {
-    
-    accepted += hmc(phi, p, iter);
-    
-    //Percolate and flip the lattice
-    if(iter%p.nperc ==  0) {
-      LatticePercolate(bond, label, phi);
-      
-      stop = false;
-      for(int relax = 0; relax < 1000 && !stop; relax++) {
-	stop = MultigridSW(label, bond);
-      }
 
-      //Lattice bonds identified. Flip 'em!
-      FlipSpins(phi,label);
+#pragma acc init
+#pragma acc data copy(fU[0:L][0:L]) copy(mom[0:L][0:L]) copy(phi[0:L][0:L]) 
+  {
+    //Thermalise the field. This evolves the phi field
+    //from a completely random (hot start)
+    //or a completely ordered (cold start)
+    //to a state of thermal equlibrium.
+    for(int iter = 0; iter < WARM_UP; iter++) {
+      accepted = hmc(fU, mom, phi, p, iter);
+      if(iter%p.nperc == 0) {
+	//LatticePercolate(bond, label, phi);
+	stop = false;
+	for(int relax = 0; relax < 1000 && !stop; relax++) {
+	  stop =  MultigridSW(label, bond);
+	  //FlipSpins(phi,label);
+	}
+      }  
     }
     
-    if((iter+1)%p.nskip == 0) {
+    //reset acceptance
+    accepted = 0;
+    for(int iter = WARM_UP; iter < p.nskip*MEASURE + WARM_UP; iter++) {
       
-      measurement++;
+      accepted += hmc(fU, mom, phi, p, iter);
       
-      //Get observables
-      getMag = measMag(phi);
-      Phi += getMag;
+      //Percolate and flip the lattice
+      if(iter%p.nperc ==  0) {
+	LatticePercolate(bond, label, phi);
+	
+	stop = false;
+	for(int relax = 0; relax < 1000 && !stop; relax++) {
+	  stop = MultigridSW(label, bond);
+	}
+	
+	//Lattice bonds identified. Flip 'em!
+	FlipSpins(phi,label);
+      }
       
-      getMag *= getMag;
-      Phi2 += getMag;
-      
-      getMag *= getMag;
-      Phi4 += getMag;      
-
-      double avPhi = Phi/measurement;
-      double avPhi2 = Phi2/measurement;
-      double avPhi4 = Phi4/measurement;
-
-      double vol = L*L;
-      double vol2= vol*vol;
-      double vol4= vol*vol*vol*vol;
-      
-      //Diagnostics and observables
-      //---------------------------------------------------------------------
-      // 1. Try to keep the acceptance rate between 0.75 - 0.85. Do this by 
-      //    varying the step size of the HMC integrator.
-      // 2. <exp(-dH)> should be ~1.0, and ever so slightly larger.
-      // 3. <dH> should be ~0.0, and ever so slightly positive.
-      // 4. <phi>, <phi**2>, <phi**4> and the Binder cumulant depend on
-      //    musqr and lambda.
-      cout << "measurement " << measurement << endl;
-      cout << "HMC acceptance rate = " << (double)accepted/(measurement*p.nskip) << endl;
-      cout << "HMC <exp(-dH)>      = " << ave_expmdH/(measurement*p.nskip) << endl;
-      cout << "HMC <dH>            = " << ave_dH/(measurement*p.nskip) << endl;
-      cout << "MEAS <phi>          = " << setprecision(12) << avPhi/vol << endl;
-      cout << "MEAS <phi**2>       = " << setprecision(12) << avPhi2/vol2 << endl;
-      cout << "MEAS <phi**4>       = " << setprecision(12) << avPhi4/vol4 << endl;
-      cout << "Binder Cumulant     = " << setprecision(12) << 1.0 - Phi4/(3.0*Phi2*Phi2/measurement) << endl;
-
+      if((iter+1)%p.nskip == 0) {
+	
+	measurement++;
+	
+	//Get observables
+	getMag = measMag(phi);
+	Phi += getMag;
+	
+	getMag *= getMag;
+	Phi2 += getMag;
+	
+	getMag *= getMag;
+	Phi4 += getMag;      
+	
+	double avPhi = Phi/measurement;
+	double avPhi2 = Phi2/measurement;
+	double avPhi4 = Phi4/measurement;
+	
+	double vol = L*L;
+	double vol2= vol*vol;
+	double vol4= vol*vol*vol*vol;
+	
+	//Diagnostics and observables
+	//---------------------------------------------------------------------
+	// 1. Try to keep the acceptance rate between 0.75 - 0.85. Do this by 
+	//    varying the step size of the HMC integrator.
+	// 2. <exp(-dH)> should be ~1.0, and ever so slightly larger.
+	// 3. <dH> should be ~0.0, and ever so slightly positive.
+	// 4. <phi>, <phi**2>, <phi**4> and the Binder cumulant depend on
+	//    musqr and lambda.
+	cout << "measurement " << measurement << endl;
+	cout << "HMC acceptance rate = " << (double)accepted/(measurement*p.nskip) << endl;
+	cout << "HMC <exp(-dH)>      = " << ave_expmdH/(measurement*p.nskip) << endl;
+	cout << "HMC <dH>            = " << ave_dH/(measurement*p.nskip) << endl;
+	cout << "MEAS <phi>          = " << setprecision(12) << avPhi/vol << endl;
+	cout << "MEAS <phi**2>       = " << setprecision(12) << avPhi2/vol2 << endl;
+	cout << "MEAS <phi**4>       = " << setprecision(12) << avPhi4/vol4 << endl;
+	cout << "Binder Cumulant     = " << setprecision(12) << 1.0 - Phi4/(3.0*Phi2*Phi2/measurement) << endl;
+	
+      }
     }
-  }
 
-  //Write lattice to file at end of run.
-  outPutFile.open(namePhiField,ios::in|ios::out|ios::trunc);
-  outPutFile.setf(ios_base::fixed, ios_base::floatfield);   
-  writeLattice(phi, outPutFile);
-  outPutFile.close();
+    //Write lattice to file at end of run.
+    outPutFile.open(namePhiField,ios::in|ios::out|ios::trunc);
+    outPutFile.setf(ios_base::fixed, ios_base::floatfield);   
+    writeLattice(phi, outPutFile);
+    outPutFile.close();
+    
+  }//END PRAGMA ACC COPY
   
   return 0;
 }
@@ -330,9 +335,8 @@ void FlipSpins(double phi[L][L], const int label[L][L]) {
   return;
 }
 
-int hmc(double phi[L][L], param_t p, int iter) {
+int hmc(double fU[L][L], double mom[L][L], double phi[L][L], param_t p, int iter) {
   
-  double mom[L][L];
   double phiOld[L][L];
   double H = 0.0, Hold = 0.0;
 
@@ -343,7 +347,7 @@ int hmc(double phi[L][L], param_t p, int iter) {
   gaussReal_F(mom); 
   
   Hold = calcH(mom, phi, p);
-  trajectory(mom, phi, p); // MD trajectory using Verlet  
+  trajectory(fU, mom, phi, p); // MD trajectory using Verlet  
   H = calcH(mom, phi, p);
 
   //record HMC diagnostics
@@ -399,11 +403,9 @@ double calcH(double mom[L][L], double phi[L][L],  param_t p) {
   Put in openACC pragma   
   =====================================================*/
 
-void trajectory(double mom[L][L], double phi[L][L], param_t p) {
+void trajectory(double fU[L][L], double mom[L][L], double phi[L][L], param_t p) {
 
   const double dt = p.dt;
-  
-  double fU[L][L];
   
   //Initial half step:
   //P_{1/2} = P_0 - dtau/2 * fU
@@ -427,40 +429,49 @@ void trajectory(double mom[L][L], double phi[L][L], param_t p) {
   update_phi(phi, mom, p, dt);
   forceU(fU, phi, p);
   update_mom(mom, fU, p, 0.5*dt);
+  
   return;
 }
 
 void forceU(double fU[L][L], double phi[L][L], param_t p) {
   
-  for(int x=0; x<L; x++)
-    for(int y=0; y<L; y++) {
-      fU[x][y] = 0.0;
-      fU[x][y] -= phi[(x+1)%L][y] - 2.0*phi[x][y] + phi[(x-1+L)%L][y];
-      fU[x][y] -= phi[x][(y+1)%L] - 2.0*phi[x][y] + phi[x][(y-1+L)%L];
-      fU[x][y] += (2.0*p.musqr + 4.0*p.lambda*phi[x][y]*phi[x][y]) * phi[x][y];
-    }
+#pragma acc data present(phi[0:L][0:L]) present(fU[0:L][0:L]) 
+  {
+#pragma acc parallel loop collapse(4)
+    for(int x=0; x<L; x++)
+      for(int y=0; y<L; y++) {
+	fU[x][y] = 0.0;
+	fU[x][y] -= phi[(x+1)%L][y] - 2.0*phi[x][y] + phi[(x-1+L)%L][y];
+	fU[x][y] -= phi[x][(y+1)%L] - 2.0*phi[x][y] + phi[x][(y-1+L)%L];
+	fU[x][y] += (2.0*p.musqr + 4.0*p.lambda*phi[x][y]*phi[x][y]) * phi[x][y];
+      }
+  }
   return;
 }
 
 void update_mom(double mom[L][L], double fU[L][L], param_t p, double dt) {
-  
-  for(int x=0; x<L; x++)
-    for(int y=0; y<L; y++) 
-      mom[x][y] -= fU[x][y] * dt;
+
+#pragma acc data present(fU[0:L][0:L]) present(mom[0:L][0:L])
+  {
+#pragma acc parallel loop
+    for(int x=0; x<L; x++)
+      for(int y=0; y<L; y++) 
+	mom[x][y] -= fU[x][y] * dt;
+  }
 }
 
 
 void update_phi(double phi[L][L], double mom[L][L], param_t p, double dt) {
-  
-  for(int x=0; x<L; x++)
-    for(int y=0; y<L; y++) 
+
+#pragma acc data present(phi[0:L][0:L]) present(mom[0:L][0:L])
+  {
+#pragma acc parallel loop
+    for(int x=0; x<L; x++)
+      for(int y=0; y<L; y++) 
       phi[x][y] += mom[x][y] * dt;
-  
+  }
   return;
 }
-
-
-
 
 void printLattice(const double phi[L][L]) {
   for(int x =0;x< L;x++){

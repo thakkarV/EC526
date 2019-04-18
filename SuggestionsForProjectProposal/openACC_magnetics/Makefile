@@ -2,8 +2,8 @@
 .SUFFIXES: .o .cpp
 
 #COMPILER = GCC
-COMPILER = PGI
-#COMPILER = PGI-tesla
+#COMPILER = PGI
+COMPILER = PGI-tesla
 #COMPILER = PGI-multicore
 
 CXX=pgc++

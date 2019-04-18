@@ -104,7 +104,7 @@ int main(int argc, char** argv)
     // of clause are listed:
     //
     //     1. copy(A[0:nx*ny])      The 'copy' clause tells the compiler that it should copy the HOST
-    //                              data in the A array to the GPU at the start of teh caluclation, and
+    //                              data in the A array to the GPU at the start of the caluclation, and
     //                              it is also to copy the data in the GPU back to the host at the end of the
     //                              calculation
     //
