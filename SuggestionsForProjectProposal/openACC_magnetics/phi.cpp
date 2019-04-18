@@ -1,39 +1,6 @@
-<<<<<<< HEAD
-/* 
-================================================================================= 
-This is a 2d phi 4th code on a torus desinged to be easy to convet to openACC.
-=================================================================================
-
-Comparison of Binder Cummulant with Schaich 
-
-Standard Form:  1/2\sum_<xy> (phi_x - phi_y)^2 +  m_in/2 phi^2_x + lambda_in/4 phi^4_x
-This Code:      S = 1/2\sum_<xy> (phi_x - phi_y)^2  - musqr phi^2_x + lambda phi^4_x
-Schaich Code:   S = - \sum_<x y> phi_x phi_y  + (2 + m_in/2) phi^2_x  + lambda phi^4_x
-
-So Schaich does a redefinition so simplify the code
-
-lambda = lambda_in / 4;
-muSquared = 2 + m_in / 2 ;
-
-So For this code: ./2d_phi4 - 0.7 0.5 32 16384 16384
-in the present code the parameters map is
-
-lambda = 0.5 ==> lambda 0.5/4 = 0.125
-m_in = -0.7  ==> musqr =  - m_in / 2=  0.7/2   = 0.35
-
-Schaich Binder  = 0.524037
-
-My test value:  = 0.52032117573  and 0.521459040377
-
-With SW  = 0.520920506171
-
-*/
-
-=======
 //================================================================================= 
 // This is a 2d phi 4th code on a torus desinged to be easy to convet to openACC.
 //=================================================================================
->>>>>>> f0d1bddaf4b4dce3405d68c6abead3308f297035
 
 #include <iostream>
 #include <fstream>
@@ -387,28 +354,9 @@ int hmc(double phi[L][L], param_t p, int iter) {
     ave_dH += H-Hold;
   }
   
-<<<<<<< HEAD
-  //Initial half step
-  for(int x=0; x<L; x++)
-    for(int y=0; y<L; y++)
-      phi[x][y] += mom[x][y] * p.dt/2.0;
-  
-  //Steps
-<<<<<<< HEAD
-  for(int k=1; k<p.nstep; k++) {      
-    for(int x=0; x<L; x++)
-      for(int y=0; y<L; y++)
-	phi[x][y] += mom[x][y] * p.dt;
-=======
-  for(int step = 1; step < p.nstep; step++) {      
-    for(int x =0;x< L;x++)
-      for(int y =0;y< L;y++)
-	phi[x][y] +=   mom[x][y] * p.dt;
-=======
   // Metropolis accept/reject step
   // Always accepts trajectories during first half of warm up.
   if (drand48() > exp(-(H-Hold)) && iter > WARM_UP/2-1) {
->>>>>>> f0d1bddaf4b4dce3405d68c6abead3308f297035
     
     //Keep old field
     copyField(phi, phiOld);
