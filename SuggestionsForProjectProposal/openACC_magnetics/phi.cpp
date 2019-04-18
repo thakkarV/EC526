@@ -11,11 +11,11 @@ using namespace std;
 #include <cmath>
 #include <complex>
 
-#define L 64
+#define L 32
 #define D 2
  
 #define MEASURE 100
-#define WARM_UP 1000
+#define WARM_UP 100
 typedef complex<double> Complex;
 #define I Complex(0,1)
 #define PI 3.141592653589793
@@ -128,8 +128,6 @@ int main(int argc, char **argv) {
   // coldStart(phi,p);
   hotStart(phi, p);
   
-  int count = 0;
-  int index = 0;
   string namePhiField;
   fstream outPutFile;
 
@@ -404,7 +402,6 @@ double calcH(double mom[L][L], double phi[L][L],  param_t p) {
 void trajectory(double mom[L][L], double phi[L][L], param_t p) {
 
   const double dt = p.dt;
-  const int nstep = p.nstep;
   
   double fU[L][L];
   
