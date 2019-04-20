@@ -11,7 +11,7 @@ using namespace std;
 #include <cmath>
 #include <complex>
 
-#define L 2048
+#define L 64
 #define D 2
  
 #define MEASURE 5
@@ -39,12 +39,14 @@ void hotStart(double phi[L][L], param_t p);
 void coldStart(double phi[L][L],param_t p);
 void writeLattice(const double phi[L][L], fstream & nameStream);
 void readLattice(double phi[L][L],  fstream & nameStream );
-int hmc(double fU[L][L], double mom[L][L], double phi[L][L], param_t p, int iter);
+//int hmc(double fU[L][L], double mom[L][L], double phi[L][L], param_t p, int iter);
+int hmc(double phi[L][L], param_t p, int iter);
 double calcH(double mom[L][L], double phi[L][L],param_t p);
 void forceU(double fU[L][L], double phi[L][L], param_t p);
 void update_mom(double mom[L][L], double fU[L][L], param_t p, double dt);
 void update_phi(double phi[L][L], double mom[L][L], param_t p, double dt);
-void trajectory(double fU[L][L], double mom[L][L], double phi[L][L], param_t p);
+//void trajectory(double fU[L][L], double mom[L][L], double phi[L][L], param_t p);
+void trajectory(double mom[L][L], double phi[L][L], param_t p);
 
 void gaussReal_F(double mom[L][L]);
 double measMag(const double phi[L][L]);
@@ -119,8 +121,8 @@ int main(int argc, char **argv) {
   p.nperc = 5;
   
   double phi[L][L];
-  double mom[L][L];
-  double fU[L][L];
+  //double mom[L][L];
+  //double fU[L][L];
 
   cout <<" Size "<< L  <<" lambda = "<< p.lambda <<" musqr = "<< p.musqr << endl;
   cout<<" time step = "<< p.dt<< " trajectory steps "<<  p.nstep  << " trajectory length = " << p.dt*p.nstep<< endl;
@@ -160,14 +162,16 @@ int main(int argc, char **argv) {
   zeroField(momZero);
 
 #pragma acc init
-#pragma acc data copy(fU[0:L][0:L]) copy(mom[0:L][0:L]) copy(phi[0:L][0:L]) 
+  //#pragma acc data copy(fU[0:L][0:L]) copy(mom[0:L][0:L]) copy(phi[0:L][0:L])
+#pragma acc data copy(phi[0:L][0:L]) 
   {
     //Thermalise the field. This evolves the phi field
     //from a completely random (hot start)
     //or a completely ordered (cold start)
     //to a state of thermal equlibrium.
     for(int iter = 0; iter < WARM_UP; iter++) {
-      accepted = hmc(fU, mom, phi, p, iter);
+      //accepted = hmc(fU, mom, phi, p, iter);
+      accepted = hmc(phi, p, iter);
       if(iter%p.nperc == 0) {
 	//LatticePercolate(bond, label, phi);
 	stop = false;
@@ -182,7 +186,8 @@ int main(int argc, char **argv) {
     accepted = 0;
     for(int iter = WARM_UP; iter < p.nskip*MEASURE + WARM_UP; iter++) {
       
-      accepted += hmc(fU, mom, phi, p, iter);
+      //accepted += hmc(fU, mom, phi, p, iter);
+      accepted += hmc(phi, p, iter);
       
       //Percolate and flip the lattice
       if(iter%p.nperc ==  0) {
@@ -335,19 +340,20 @@ void FlipSpins(double phi[L][L], const int label[L][L]) {
   return;
 }
 
-int hmc(double fU[L][L], double mom[L][L], double phi[L][L], param_t p, int iter) {
+int hmc(double phi[L][L], param_t p, int iter) {
   
   double phiOld[L][L];
   double H = 0.0, Hold = 0.0;
 
   //Copy the field in case of rejection
   copyField(phiOld, phi);
-  
+
+  double mom[L][L];
   zeroField(mom);  
   gaussReal_F(mom); 
   
   Hold = calcH(mom, phi, p);
-  trajectory(fU, mom, phi, p); // MD trajectory using Verlet  
+  trajectory(mom, phi, p); // MD trajectory using Verlet  
   H = calcH(mom, phi, p);
 
   //record HMC diagnostics
@@ -403,33 +409,35 @@ double calcH(double mom[L][L], double phi[L][L],  param_t p) {
   Put in openACC pragma   
   =====================================================*/
 
-void trajectory(double fU[L][L], double mom[L][L], double phi[L][L], param_t p) {
+void trajectory(double mom[L][L], double phi[L][L], param_t p) {
 
   const double dt = p.dt;
-  
-  //Initial half step:
-  //P_{1/2} = P_0 - dtau/2 * fU
-  forceU(fU, phi, p);
-  update_mom(mom, fU, p, 0.5*dt);
-  
-  //step loop
-  for(int k=1; k<p.nstep; k++) {
-    
-    //U_{k} = U_{k-1} + P_{k-1/2} * dt
-    update_phi(phi, mom, p, dt);
-    
-    //P_{k+1/2} = P_{k-1/2} - fU * dt 
+  double fU[L][L];
+#pragma acc data copy(fU[0:L][0:L]) copy(mom[0:L][0:L])
+  {
+    //Initial half step:
+    //P_{1/2} = P_0 - dtau/2 * fU
     forceU(fU, phi, p);
-    update_mom(mom, fU,  p, dt);
+    update_mom(mom, fU, p, 0.5*dt);
     
-  } //end step loop
-  
-  //Final half step.
-  //U_{n} = U_{n-1} + P_{n-1/2} * dt
-  update_phi(phi, mom, p, dt);
-  forceU(fU, phi, p);
-  update_mom(mom, fU, p, 0.5*dt);
-  
+    //step loop
+    for(int k=1; k<p.nstep; k++) {
+      
+      //U_{k} = U_{k-1} + P_{k-1/2} * dt
+      update_phi(phi, mom, p, dt);
+      
+      //P_{k+1/2} = P_{k-1/2} - fU * dt 
+      forceU(fU, phi, p);
+      update_mom(mom, fU,  p, dt);
+      
+    } //end step loop
+    
+    //Final half step.
+    //U_{n} = U_{n-1} + P_{n-1/2} * dt
+    update_phi(phi, mom, p, dt);
+    forceU(fU, phi, p);
+    update_mom(mom, fU, p, 0.5*dt);
+  }
   return;
 }
 
@@ -437,7 +445,7 @@ void forceU(double fU[L][L], double phi[L][L], param_t p) {
   
 #pragma acc data present(phi[0:L][0:L]) present(fU[0:L][0:L]) 
   {
-#pragma acc parallel loop collapse(4)
+#pragma acc for parallel independent 
     for(int x=0; x<L; x++)
       for(int y=0; y<L; y++) {
 	fU[x][y] = 0.0;
@@ -453,7 +461,7 @@ void update_mom(double mom[L][L], double fU[L][L], param_t p, double dt) {
 
 #pragma acc data present(fU[0:L][0:L]) present(mom[0:L][0:L])
   {
-#pragma acc parallel loop
+#pragma acc for parallel independent 
     for(int x=0; x<L; x++)
       for(int y=0; y<L; y++) 
 	mom[x][y] -= fU[x][y] * dt;
@@ -462,13 +470,13 @@ void update_mom(double mom[L][L], double fU[L][L], param_t p, double dt) {
 
 
 void update_phi(double phi[L][L], double mom[L][L], param_t p, double dt) {
-
+  
 #pragma acc data present(phi[0:L][0:L]) present(mom[0:L][0:L])
   {
-#pragma acc parallel loop
+#pragma acc for parallel independent 
     for(int x=0; x<L; x++)
       for(int y=0; y<L; y++) 
-      phi[x][y] += mom[x][y] * dt;
+	phi[x][y] += mom[x][y] * dt;
   }
   return;
 }
